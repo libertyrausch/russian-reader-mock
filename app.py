@@ -1,81 +1,103 @@
 import streamlit as st
 import random
 
-st.set_page_config(page_title="Russian Reading App", layout="wide")
+st.set_page_config(page_title="📚 Russian Reading Trainer", layout="wide")
+st.title("📖 Russian Reading Comprehension Trainer")
 
-# Mock data: A few sample Russian passages with questions
-sample_passages = [
-    {
-        "passage": "Анна проснулась рано утром. За окном светило солнце, и птицы пели свои утренние песни. Сегодня у неё был важный день — первое собеседование на работу.",
-        "qa": [
-            {"question": "Почему день был важным для Анны?", "correct_answer": "У неё было собеседование на работу."},
-            {"question": "Что делали птицы за окном?", "correct_answer": "Они пели свои утренние песни."},
-        ]
-    },
-    {
-        "passage": "Иван всегда мечтал поехать в Санкт-Петербург. Он читал о его красивых дворцах, мостах и белых ночах. Летом он наконец-то купил билет и отправился в путь.",
-        "qa": [
-            {"question": "Куда хотел поехать Иван?", "correct_answer": "В Санкт-Петербург."},
-            {"question": "Почему Иван интересовался этим городом?", "correct_answer": "Из-за дворцов, мостов и белых ночей."},
-        ]
-    },
-    {
-        "passage": "Оля и её брат пошли в парк. Они катались на велосипедах, ели мороженое и играли с собакой. Это был один из самых весёлых дней лета.",
-        "qa": [
-            {"question": "С кем пошла Оля в парк?", "correct_answer": "С братом."},
-            {"question": "Что они делали в парке?", "correct_answer": "Катались на велосипедах, ели мороженое и играли с собакой."},
-        ]
-    },
-]
+# --- Initialize progress tracking in session state ---
+if "completed_passages" not in st.session_state:
+    st.session_state.completed_passages = 0
+if "correct_answers" not in st.session_state:
+    st.session_state.correct_answers = 0
+if "answered" not in st.session_state:
+    st.session_state.answered = False
+if "current_passage_index" not in st.session_state:
+    st.session_state.current_passage_index = 0
+if "go_next" not in st.session_state:
+    st.session_state.go_next = False
 
-# Load passage if not already present
-if "qa_block" not in st.session_state:
-    st.session_state.qa_block = random.choice(sample_passages)
-    st.session_state.score = 0
-    st.session_state.total = 0
+# --- Custom CSS for larger fonts and side progress bar ---
+st.markdown("""
+    <style>
+    .question-text {
+        font-size: 20px !important;
+        font-weight: 600;
+    }
+    .stRadio > div > label,
+    .stSelectbox label, 
+    .stTextInput label,
+    .stSelectbox div {
+        font-size: 18px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# Function to simulate getting a new passage
-def load_new_passage():
-    st.session_state.qa_block = random.choice(sample_passages)
-    st.session_state.feedback = {}
-    st.session_state.score = 0
-    st.session_state.total = 0
+# --- Full-length passages (500+ words each) with unique questions ---
+from passages_data import passages_data
 
-st.title("🇷🇺 Russian Reading Practice App (Mock Mode)")
+if st.session_state.current_passage_index >= len(passages_data):
+    st.success("🎉 Вы завершили все доступные тексты!")
+    st.stop()
 
-st.markdown("Click the button below to load a random Russian reading passage with AI-style questions.")
+current = passages_data[st.session_state.current_passage_index]
 
-# New passage button
-if st.button("📖 Load New Passage"):
-    load_new_passage()
+col1, col2 = st.columns([4, 1])
 
-# Show passage
-st.subheader("📜 Passage")
-st.write(st.session_state.qa_block["passage"])
+with col1:
+    st.subheader("📘 Прочитайте текст:")
+    st.write(current["text"])
 
-# Show questions
-st.subheader("❓ Questions")
-if "feedback" not in st.session_state:
-    st.session_state.feedback = {}
+    responses = {}
+    for idx, q in enumerate(current["questions"]):
+        key = f"q{idx}"
+        st.markdown(f"<div class='question-text'>❓ {q['question']}</div>", unsafe_allow_html=True)
 
-for i, qa in enumerate(st.session_state.qa_block["qa"]):
-    user_answer = st.text_input(f"Q{i+1}: {qa['question']}", key=f"answer_{i}")
+        if q["type"] == "true_false":
+            responses[key] = st.radio("Ваш ответ:", ["Правда", "Ложь"], key=key, index=None)
+        elif q["type"] == "multiple_choice":
+            responses[key] = st.radio("Выберите один вариант:", q["options"], key=key, index=None)
+        elif q["type"] == "matching":
+            responses[key] = st.selectbox("Её значение:", q["options"], key=key, index=None)
+        elif q["type"] == "short_answer":
+            responses[key] = st.text_input("Ваш ответ:", key=key)
 
-    if user_answer and f"feedback_{i}" not in st.session_state.feedback:
-        correct = qa["correct_answer"].strip().lower()
-        given = user_answer.strip().lower()
+    if st.button("✅ Проверить ответы") and not st.session_state.answered:
+        score = 0
+        for idx, q in enumerate(current["questions"]):
+            key = f"q{idx}"
+            ans = responses[key]
+            if q["type"] in ["true_false", "multiple_choice", "matching"]:
+                if ans == q["answer"]:
+                    st.success(f"✅ Верно! {q['explanation']}")
+                    score += 1
+                elif ans:
+                    st.error(f"❌ Неверно. {q['explanation']}")
+            elif q["type"] == "short_answer":
+                if any(kw in ans.lower() for kw in q["keywords"]):
+                    st.success(f"✅ Верно! {q['explanation']}")
+                    score += 1
+                elif ans:
+                    st.error(f"❌ Неверно. {q['explanation']}")
 
-        is_correct = correct == given
-        feedback_msg = "✅ Correct!" if is_correct else f"❌ Incorrect. Correct answer: {qa['correct_answer']}"
-        st.session_state.feedback[f"feedback_{i}"] = feedback_msg
+        st.session_state.correct_answers += score
+        st.session_state.answered = True
+        st.session_state.go_next = True
 
-        if is_correct:
-            st.session_state.score += 1
-        st.session_state.total += 1
+    if st.session_state.answered and st.session_state.go_next:
+        if st.button("➡️ Следующий текст"):
+            st.session_state.answered = False
+            st.session_state.go_next = False
+            st.session_state.completed_passages += 1
+            st.session_state.current_passage_index += 1
+            for i in range(len(current["questions"])):
+                st.session_state.pop(f"q{i}", None)
+            st.rerun()
 
-    if f"feedback_{i}" in st.session_state.feedback:
-        st.write(st.session_state.feedback[f"feedback_{i}"])
-
-# Show score
-if st.session_state.total > 0:
-    st.success(f"🎯 Score: {st.session_state.score} / {st.session_state.total}")
+with col2:
+    st.markdown("## 🧭 Прогресс")
+    st.markdown(f"📘 Текстов пройдено: **{st.session_state.completed_passages}**")
+    st.markdown(f"✅ Правильных ответов: **{st.session_state.correct_answers}**")
+    total_questions = st.session_state.completed_passages * 4
+    if total_questions:
+        accuracy = st.session_state.correct_answers / total_questions * 100
+        st.markdown(f"🎯 Точность: **{accuracy:.1f}%**")
